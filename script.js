@@ -34,12 +34,13 @@ function determineMainDirection(start, end) {
 
 function generatePath(start, end, options = {}) {
     const {
+        direction = "horizontal",
         stepSize = canvas.width * 0.07,
-        maxHorizontalMoves = 2,
-        horizontalBoundaryMin = 0,
-        horizontalBoundaryMax = canvas.width,
-        verticalBias = 0.5,
-        horizontalBias = 0.5,
+        maxSideMoves = 2,
+        sideBoundaryMin = 0,
+        sideBoundaryMax = (direction==="horizontal"? canvas.height : canvas.width),
+        mainBias = 0.5,
+        sideBias = 0.5,
         allowRandomSideSteps = true
     } = options;
 
@@ -47,126 +48,121 @@ function generatePath(start, end, options = {}) {
     let [currentX, currentY] = start;
 
     let lastDirection = null;
-    let horizontalMoveCount = 0;
+    let sideMoveCount = 0;
 
-    const mainDir = determineMainDirection(start, end);
+    // 定义主/侧方向的方向集合
+    const mainDirs = (direction === "horizontal") ? ["left","right"] : ["up","down"];
+    const sideDirs = (direction === "horizontal") ? ["up","down"] : ["left","right"];
 
     function isCloseToEnd() {
-        const distance = Math.sqrt((end[0] - currentX)**2 + (end[1] - currentY)**2);
+        const distance = Math.sqrt((end[0]-currentX)**2 + (end[1]-currentY)**2);
         return distance < stepSize;
     }
 
-    function isDirectionAllowed(direction) {
-        if (mainDir === "up" && direction === "down") return false;
-        if (mainDir === "down" && direction === "up") return false;
-        if (mainDir === "right" && direction === "left") return false;
-        if (mainDir === "left" && direction === "right") return false;
-
+    function isDirectionAllowed(dir) {
+        // 不允许与主方向相反的方向（可选逻辑）
+        // 不允许立即反向
         if (lastDirection) {
-            if (lastDirection === "up" && direction === "down") return false;
-            if (lastDirection === "down" && direction === "up") return false;
-            if (lastDirection === "left" && direction === "right") return false;
-            if (lastDirection === "right" && direction === "left") return false;
+            if ((lastDirection==="up" && dir==="down") ||
+                (lastDirection==="down" && dir==="up") ||
+                (lastDirection==="left" && dir==="right") ||
+                (lastDirection==="right" && dir==="left")) {
+                return false;
+            }
         }
-
         return true;
     }
 
     function decideNextStep() {
-        const dxNow = end[0] - currentX;
-        const dyNow = end[1] - currentY;
+        const dx = end[0]-currentX;
+        const dy = end[1]-currentY;
 
         let possibleDirections = [];
-        if (dyNow < 0 && isDirectionAllowed("up")) possibleDirections.push("up");
-        if (dyNow > 0 && isDirectionAllowed("down")) possibleDirections.push("down");
-        if (dxNow > 0 && isDirectionAllowed("right")) possibleDirections.push("right");
-        if (dxNow < 0 && isDirectionAllowed("left")) possibleDirections.push("left");
+        if (dy < 0 && isDirectionAllowed("up")) possibleDirections.push("up");
+        if (dy > 0 && isDirectionAllowed("down")) possibleDirections.push("down");
+        if (dx > 0 && isDirectionAllowed("right")) possibleDirections.push("right");
+        if (dx < 0 && isDirectionAllowed("left")) possibleDirections.push("left");
 
-        // increase horizontal moves posibility
-        if (isDirectionAllowed("left") && Math.random() < 0.2) possibleDirections.push("left");
-        if (isDirectionAllowed("right") && Math.random() < 0.2) possibleDirections.push("right");
-
-        // random side steps
         if (allowRandomSideSteps && possibleDirections.length < 2) {
-            const perpendicularDirs = (mainDir === "up" || mainDir === "down") ? ["left","right"] : ["up","down"];
-            const allowedPerpendicular = perpendicularDirs.filter(isDirectionAllowed);
-            if (allowedPerpendicular.length > 0 && Math.random() < 0.5) {
-                possibleDirections.push(allowedPerpendicular[Math.floor(Math.random()*allowedPerpendicular.length)]);
+            const perpDirs = sideDirs.filter(isDirectionAllowed);
+            if (perpDirs.length > 0 && Math.random()<0.5) {
+                possibleDirections.push(perpDirs[Math.floor(Math.random()*perpDirs.length)]);
             }
         }
 
-        let verticalChance = verticalBias;
-        let horizontalChance = horizontalBias;
-        if (mainDir === "up" || mainDir === "down") {
-            if (Math.abs(dyNow) > Math.abs(dxNow)) {
-                verticalChance += 0.3;
-            }
-        } else {
-            if (Math.abs(dxNow) > Math.abs(dyNow)) {
-                horizontalChance += 0.3;
-            }
+        let currentMainBias = mainBias;
+        let currentSideBias = sideBias;
+        if (direction==="horizontal" && Math.abs(dx)>Math.abs(dy)) {
+            currentMainBias += 0.3;
+        } else if (direction==="vertical" && Math.abs(dy)>Math.abs(dx)) {
+            currentMainBias += 0.3;
         }
 
-        const sum = verticalChance + horizontalChance;
-        verticalChance /= sum;
-        horizontalChance /= sum;
+        const sum = currentMainBias+currentSideBias;
+        currentMainBias/=sum;
+        currentSideBias/=sum;
 
-        let directionCandidates;
+        let dirCandidates;
         const r = Math.random();
-        if (r < verticalChance) {
-            let verticalDirs = possibleDirections.filter(d => d === "up" || d === "down");
-            if (verticalDirs.length === 0) verticalDirs = possibleDirections;
-            directionCandidates = verticalDirs;
+        if (r<currentMainBias) {
+            let mainCandidates = possibleDirections.filter(d=>mainDirs.includes(d));
+            if (mainCandidates.length===0) mainCandidates=possibleDirections;
+            dirCandidates = mainCandidates;
         } else {
-            let horizontalDirs = possibleDirections.filter(d => d === "left" || d === "right");
-            if (horizontalDirs.length === 0) horizontalDirs = possibleDirections;
-            directionCandidates = horizontalDirs;
+            let sideCandidates = possibleDirections.filter(d=>sideDirs.includes(d));
+            if (sideCandidates.length===0) sideCandidates=possibleDirections;
+            dirCandidates = sideCandidates;
         }
 
-        if (directionCandidates.length === 0) {
-            directionCandidates = possibleDirections;
-        }
+        if (dirCandidates.length===0) dirCandidates=possibleDirections;
+        let chosenDirection = dirCandidates[Math.floor(Math.random()*dirCandidates.length)];
 
-        let chosenDirection = directionCandidates[Math.floor(Math.random()*directionCandidates.length)];
-
-        //max horizontal moves
-        if (chosenDirection === "left" || chosenDirection === "right") {
-            if (lastDirection === "left" || lastDirection === "right") {
-                horizontalMoveCount++;
-                if (horizontalMoveCount > maxHorizontalMoves) {
-                    let verticalOnly = directionCandidates.filter(d => d === "up" || d === "down");
-                    if (verticalOnly.length > 0) {
-                        chosenDirection = verticalOnly[Math.floor(Math.random()*verticalOnly.length)];
-                        horizontalMoveCount = 0;
+        // 限制侧方向连续移动次数
+        if (sideDirs.includes(chosenDirection)) {
+            if (lastDirection && sideDirs.includes(lastDirection)) {
+                sideMoveCount++;
+                if (sideMoveCount > maxSideMoves) {
+                    let mainOnly = dirCandidates.filter(d=>mainDirs.includes(d));
+                    if (mainOnly.length>0) {
+                        chosenDirection = mainOnly[Math.floor(Math.random()*mainOnly.length)];
+                        sideMoveCount=0;
                     }
                 }
             } else {
-                horizontalMoveCount = 1;
+                sideMoveCount=1;
             }
         } else {
-            horizontalMoveCount = 0;
+            sideMoveCount=0;
         }
 
         return chosenDirection;
     }
 
-    let stepCount = 0;
-    while (!isCloseToEnd()) {
+    let stepCount=0;
+    while(!isCloseToEnd()) {
         stepCount++;
-        if (stepCount > 1000) break;
-        const direction = decideNextStep();
-        if (!direction) break;
+        if (stepCount>1000) break;
+        const directionChosen = decideNextStep();
+        if (!directionChosen) break;
 
-        if (direction === "up") currentY -= stepSize;
-        else if (direction === "down") currentY += stepSize;
-        else if (direction === "left") currentX -= stepSize;
-        else if (direction === "right") currentX += stepSize;
+        if (directionChosen==="up") currentY-=stepSize;
+        if (directionChosen==="down") currentY+=stepSize;
+        if (directionChosen==="left") currentX-=stepSize;
+        if (directionChosen==="right") currentX+=stepSize;
 
-        if (currentX < horizontalBoundaryMin) currentX = horizontalBoundaryMin;
-        if (currentX > horizontalBoundaryMax) currentX = horizontalBoundaryMax;
+        // 应用sideBoundary限制
+        // 主方向是horizontal => sideBoundary约束y
+        // 主方向是vertical => sideBoundary约束x
+        if (direction==="horizontal") {
+            if (currentY<sideBoundaryMin) currentY=sideBoundaryMin;
+            if (currentY>sideBoundaryMax) currentY=sideBoundaryMax;
+        } else {
+            if (currentX<sideBoundaryMin) currentX=sideBoundaryMin;
+            if (currentX>sideBoundaryMax) currentX=sideBoundaryMax;
+        }
 
-        path.push([currentX, currentY]);
-        lastDirection = direction;
+        path.push([currentX,currentY]);
+        lastDirection=directionChosen;
     }
 
     path.push([end[0], end[1]]);
@@ -174,19 +170,17 @@ function generatePath(start, end, options = {}) {
 }
 
 function drawPath(path) {
-    ctx.strokeStyle = "black";
-    ctx.lineWidth = 2;
+    ctx.strokeStyle="black";
+    ctx.lineWidth=2;
     ctx.beginPath();
-    for (let i = 0; i < path.length; i++) {
-        const [x, y] = path[i];
-        if (i === 0) {
-            ctx.moveTo(x, y);
-        } else {
-            ctx.lineTo(x, y);
-        }
+    for (let i=0; i<path.length; i++) {
+        const [x,y]=path[i];
+        if (i===0) ctx.moveTo(x,y);
+        else ctx.lineTo(x,y);
     }
     ctx.stroke();
 }
+
 
 
 const centerX = canvas.width / 2;
@@ -209,13 +203,14 @@ const horizontalBoundaryMax = midX + (baseMargin + dynamicMargin);
 
 // mid path
 const middlePath = generatePath(start, end, {
-    stepSize: canvas.width * 0.07,
-    maxHorizontalMoves: 2,
-    horizontalBoundaryMin,
-    horizontalBoundaryMax,
-    verticalBias: 0.3,
-    horizontalBias: 0.7,
-    allowRandomSideSteps: true
+    direction: "vertical",
+        stepSize: canvas.width * 0.07,
+        maxSideMoves: 2,
+        sideBoundaryMin: horizontalBoundaryMin,
+        sideBoundaryMax: horizontalBoundaryMax,
+        mainBias: 0.3,
+        sideBias: 0.7,
+        allowRandomSideSteps: true
 });
 drawPath(middlePath);
 
@@ -226,192 +221,203 @@ const leftLowerPoint = [canvas.width * (1/6), canvas.height * 0.75];
 // Left C path: upper spawn point -> upper left point -> lower left point -> lower spawn point
 // 1. Upper spawn point -> upper left point
 const leftUpperPath = generatePath(end, leftUpperPoint, {
+    direction: "horizontal",
     stepSize: canvas.width * 0.03,
-    maxHorizontalMoves: 2,
-    horizontalBoundaryMin: Math.min(end[0], leftUpperPoint[0]) - canvas.width * 0.14,
-    horizontalBoundaryMax: Math.max(end[0], leftUpperPoint[0]) + canvas.width * 0.14,
-    verticalBias: 0.3,
-    horizontalBias: 0.7,
+    maxSideMoves: 2,
+    sideBoundaryMin: Math.min(end[1], leftUpperPoint[1]) - canvas.height * 0.14,
+    sideBoundaryMax: Math.max(end[1], leftUpperPoint[1]) + canvas.height * 0.14,
+    mainBias: 0.7,
+    sideBias: 0.3,
     allowRandomSideSteps: true
 });
 drawPath(leftUpperPath);
 
 // 2. Upper left point -> Lower left point
 const leftMidPath = generatePath(leftUpperPoint, leftLowerPoint, {
+    direction: "vertical",
     stepSize: canvas.width * 0.03,
-    maxHorizontalMoves: 2,
-    horizontalBoundaryMin: Math.min(leftUpperPoint[0], leftLowerPoint[0]) - canvas.width * 0.14,
-    horizontalBoundaryMax: Math.max(leftUpperPoint[0], leftLowerPoint[0]) + canvas.width * 0.14,
-    verticalBias: 0.7,
-    horizontalBias: 0.3,
+    maxSideMoves: 2,
+    sideBoundaryMin: Math.min(leftUpperPoint[0], leftLowerPoint[0]) - canvas.width * 0.14,
+    sideBoundaryMax: Math.max(leftUpperPoint[0], leftLowerPoint[0]) + canvas.width * 0.14,
+    mainBias: 0.6,
+    sideBias: 0.4,
     allowRandomSideSteps: true
 });
 drawPath(leftMidPath);
 
+
 // 3. Lower left point -> lower spawn point
 const leftDownPath = generatePath(leftLowerPoint, start, {
+    direction: "horizontal",
     stepSize: canvas.width * 0.03,
-    maxHorizontalMoves: 2,
-    horizontalBoundaryMin: Math.min(leftLowerPoint[0], start[0]) - canvas.width * 0.14,
-    horizontalBoundaryMax: Math.max(leftLowerPoint[0], start[0]) + canvas.width * 0.14,
-    verticalBias: 0.3,
-    horizontalBias: 0.7,
+    maxSideMoves: 2,
+    sideBoundaryMin: Math.min(leftLowerPoint[1], start[1]) - canvas.height * 0.14,
+    sideBoundaryMax: Math.max(leftLowerPoint[1], start[1]) + canvas.height * 0.14,
+    mainBias: 0.7,
+    sideBias: 0.3,
     allowRandomSideSteps: true
 });
 drawPath(leftDownPath);
+
 
 
 const rightLowerPoint = [canvas.width * (5/6), canvas.height * 0.75];
 const rightUpperPoint = [canvas.width * (5/6), canvas.height * 0.25];
 
 // Right C
-// 1. bot spawn > right bot
+// 1. bottom spawn > lower right
 const rightDownPath = generatePath(start, rightLowerPoint, {
+    direction: "horizontal",
     stepSize: canvas.width * 0.03,
-    maxHorizontalMoves: 2,
-    horizontalBoundaryMin: Math.min(start[0], rightLowerPoint[0]) - canvas.width * 0.14,
-    horizontalBoundaryMax: Math.max(start[0], rightLowerPoint[0]) + canvas.width * 0.14,
-    verticalBias: 0.3,
-    horizontalBias: 0.7,
+    maxSideMoves: 2,
+    sideBoundaryMin: Math.min(start[1], rightLowerPoint[1]) - canvas.height * 0.14,
+    sideBoundaryMax: Math.max(start[1], rightLowerPoint[1]) + canvas.height * 0.14,
+    mainBias: 0.7,
+    sideBias: 0.3,
     allowRandomSideSteps: true
 });
 drawPath(rightDownPath);
 
-// 2. right bot > right top
+
+// 2. Lower right  > upper right
 const rightMidPath = generatePath(rightLowerPoint, rightUpperPoint, {
+    direction: "vertical",
     stepSize: canvas.width * 0.03,
-    maxHorizontalMoves: 2,
-    horizontalBoundaryMin: Math.min(rightLowerPoint[0], rightUpperPoint[0]) - canvas.width * 0.14,
-    horizontalBoundaryMax: Math.max(rightLowerPoint[0], rightUpperPoint[0]) + canvas.width * 0.14,
-    verticalBias: 0.7,
-    horizontalBias: 0.3,
+    maxSideMoves: 2,
+    sideBoundaryMin: Math.min(rightLowerPoint[0], rightUpperPoint[0]) - canvas.width * 0.14,
+    sideBoundaryMax: Math.max(rightLowerPoint[0], rightUpperPoint[0]) + canvas.width * 0.14,
+    mainBias: 0.6,
+    sideBias: 0.4,
     allowRandomSideSteps: true
 });
 drawPath(rightMidPath);
 
-// 3. right top point -> upper spwan
+
+// 3. Upper right -> upper spwan
 const rightUpPath = generatePath(rightUpperPoint, end, {
+    direction: "horizontal",
     stepSize: canvas.width * 0.03,
-    maxHorizontalMoves: 2,
-    horizontalBoundaryMin: Math.min(rightUpperPoint[0], end[0]) - canvas.width * 0.14,
-    horizontalBoundaryMax: Math.max(rightUpperPoint[0], end[0]) + canvas.width * 0.14,
-    verticalBias: 0.3,
-    horizontalBias: 0.7,
+    maxSideMoves: 2,
+    sideBoundaryMin: Math.min(rightUpperPoint[1], end[1]) - canvas.height * 0.14,
+    sideBoundaryMax: Math.max(rightUpperPoint[1], end[1]) + canvas.height * 0.14,
+    mainBias: 0.7,
+    sideBias: 0.3,
     allowRandomSideSteps: true
 });
 drawPath(rightUpPath);
 
 
 
-function generateRectanglesFromPath(path, stepSize) {
-    const rects = [];
-    for (let i = 0; i < path.length - 1; i++) {
-        const [x1, y1] = path[i];
-        const [x2, y2] = path[i+1];
 
-        const dx = x2 - x1;
-        const dy = y2 - y1;
-        const length = Math.sqrt(dx*dx + dy*dy);
-        if (length === 0) continue;
+// function generateRectanglesFromPath(path, stepSize) {
+//     const rects = [];
+//     for (let i = 0; i < path.length - 1; i++) {
+//         const [x1, y1] = path[i];
+//         const [x2, y2] = path[i+1];
 
-        // current segment direction
-        const isVertical = Math.abs(dy) > Math.abs(dx);
-        const dir = isVertical ? (dy < 0 ? "up":"down") : (dx > 0 ? "right":"left");
+//         const dx = x2 - x1;
+//         const dy = y2 - y1;
+//         const length = Math.sqrt(dx*dx + dy*dy);
+//         if (length === 0) continue;
 
-        // rect random height and width
-        const minSize = stepSize;
-        const maxSize = stepSize * 1.5;
-        const width = minSize + Math.random()*(maxSize - minSize);
-        const height = minSize + Math.random()*(maxSize - minSize);
+//         // current segment direction
+//         const isVertical = Math.abs(dy) > Math.abs(dx);
+//         const dir = isVertical ? (dy < 0 ? "up":"down") : (dx > 0 ? "right":"left");
 
-        
-        const cx = (x1+x2)/2;
-        const cy = (y1+y2)/2;
-
-        let rectX = cx - width/2;
-        let rectY = cy - height/2;
+//         // rect random height and width
+//         const minSize = stepSize;
+//         const maxSize = stepSize * 1.5;
+//         const width = minSize + Math.random()*(maxSize - minSize);
+//         const height = minSize + Math.random()*(maxSize - minSize);
 
         
-        if (isVertical) {
-            // horizontal shift
-            const horizontalOffset = (width/6)*(Math.random()<0.5? -1 : 1)*Math.random();
-            rectX += horizontalOffset;
+//         const cx = (x1+x2)/2;
+//         const cy = (y1+y2)/2;
+
+//         let rectX = cx - width/2;
+//         let rectY = cy - height/2;
+
+        
+//         if (isVertical) {
+//             // horizontal shift
+//             const horizontalOffset = (width/6)*(Math.random()<0.5? -1 : 1)*Math.random();
+//             rectX += horizontalOffset;
             
-        } else {
-            // vertical shift
-            const verticalOffset = (height/6)*(Math.random()<0.5? -1 : 1)*Math.random();
-            rectY += verticalOffset;
+//         } else {
+//             // vertical shift
+//             const verticalOffset = (height/6)*(Math.random()<0.5? -1 : 1)*Math.random();
+//             rectY += verticalOffset;
             
-        }
+//         }
 
-        rects.push({x: rectX, y: rectY, width, height});
-    }
-    return rects;
-}
+//         rects.push({x: rectX, y: rectY, width, height});
+//     }
+//     return rects;
+// }
 
 
-function adjustRectangles(rects) {
+// function adjustRectangles(rects) {
     
-    rects.sort((a,b)=> a.x - b.x);
+//     rects.sort((a,b)=> a.x - b.x);
 
-    for (let i=0; i<rects.length-1; i++) {
-        const r1 = rects[i];
-        const r2 = rects[i+1];
+//     for (let i=0; i<rects.length-1; i++) {
+//         const r1 = rects[i];
+//         const r2 = rects[i+1];
 
        
-        const r1Right = r1.x + r1.width;
-        const r2Left = r2.x;
+//         const r1Right = r1.x + r1.width;
+//         const r2Left = r2.x;
 
-        if (Math.abs(r2Left - r1Right) < 20) {
+//         if (Math.abs(r2Left - r1Right) < 20) {
             
-            const mid = (r2Left + r1Right)/2;
+//             const mid = (r2Left + r1Right)/2;
             
-            const deltaR1 = mid - r1Right;
-            r1.width += deltaR1;
-            const deltaR2 = r2Left - mid;
-            r2.x = r2.x - deltaR2;
-        }
+//             const deltaR1 = mid - r1Right;
+//             r1.width += deltaR1;
+//             const deltaR2 = r2Left - mid;
+//             r2.x = r2.x - deltaR2;
+//         }
 
         
-    }
-}
+//     }
+// }
 
-//draw rect
-function drawRectangles(rects) {
-    ctx.fillStyle = "#505050";
-    for (const r of rects) {
-        ctx.fillRect(r.x, r.y, r.width, r.height);
-    }
-}
+// //draw rect
+// function drawRectangles(rects) {
+//     ctx.fillStyle = "#505050";
+//     for (const r of rects) {
+//         ctx.fillRect(r.x, r.y, r.width, r.height);
+//     }
+// }
 
 
-const middleRects = generateRectanglesFromPath(middlePath, canvas.width*0.07);
-// adjust midpath
-adjustRectangles(middleRects);
-// midpath rect
-drawRectangles(middleRects);
+// const middleRects = generateRectanglesFromPath(middlePath, canvas.width*0.07);
+// // adjust midpath
+// adjustRectangles(middleRects);
+// // midpath rect
+// drawRectangles(middleRects);
 
-// left c and right C
-const leftUpperRects = generateRectanglesFromPath(leftUpperPath, canvas.width*0.03);
-adjustRectangles(leftUpperRects);
-drawRectangles(leftUpperRects);
+// // left c and right C
+// const leftUpperRects = generateRectanglesFromPath(leftUpperPath, canvas.width*0.03);
+// adjustRectangles(leftUpperRects);
+// drawRectangles(leftUpperRects);
 
-const leftMidRects = generateRectanglesFromPath(leftMidPath, canvas.width*0.03);
-adjustRectangles(leftMidRects);
-drawRectangles(leftMidRects);
+// const leftMidRects = generateRectanglesFromPath(leftMidPath, canvas.width*0.03);
+// adjustRectangles(leftMidRects);
+// drawRectangles(leftMidRects);
 
-const leftDownRects = generateRectanglesFromPath(leftDownPath, canvas.width*0.03);
-adjustRectangles(leftDownRects);
-drawRectangles(leftDownRects);
+// const leftDownRects = generateRectanglesFromPath(leftDownPath, canvas.width*0.03);
+// adjustRectangles(leftDownRects);
+// drawRectangles(leftDownRects);
 
-const rightDownRects = generateRectanglesFromPath(rightDownPath, canvas.width*0.03);
-adjustRectangles(rightDownRects);
-drawRectangles(rightDownRects);
+// const rightDownRects = generateRectanglesFromPath(rightDownPath, canvas.width*0.03);
+// adjustRectangles(rightDownRects);
+// drawRectangles(rightDownRects);
 
-const rightMidRects = generateRectanglesFromPath(rightMidPath, canvas.width*0.03);
-adjustRectangles(rightMidRects);
-drawRectangles(rightMidRects);
+// const rightMidRects = generateRectanglesFromPath(rightMidPath, canvas.width*0.03);
+// adjustRectangles(rightMidRects);
+// drawRectangles(rightMidRects);
 
-const rightUpRects = generateRectanglesFromPath(rightUpPath, canvas.width*0.03);
-adjustRectangles(rightUpRects);
-drawRectangles(rightUpRects);
+// const rightUpRects = generateRectanglesFromPath(rightUpPath, canvas.width*0.03);
+// adjustRectangles(rightUpRects);
+// drawRectangles(rightUpRects);
