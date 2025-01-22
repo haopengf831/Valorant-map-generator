@@ -44,6 +44,8 @@ function generatePath(start, end, options = {}) {
         allowRandomSideSteps = true
     } = options;
 
+    let stepCount=0;
+
     const path = [start.slice()];
     let [currentX, currentY] = start;
 
@@ -72,7 +74,28 @@ function generatePath(start, end, options = {}) {
         return true;
     }
 
+    function forceFirstMainDirection() {
+        if (direction==="horizontal") {
+            // Decide direction depends on dx
+            const dx = end[0] - currentX;
+            if (dx < 0) return "left";
+            else return "right"; 
+        } else {
+            // direction==="vertical"
+            const dy = end[1] - currentY;
+            if (dy < 0) return "up";
+            else return "down";
+        }
+    }
+
     function decideNextStep() {
+        // If this is first step（stepIndex===0），force its direction
+        if (stepCount === 0) {
+            const forcedMainDir = forceFirstMainDirection();
+            lastDirection = forcedMainDir;  // To prevent immediate reverse direction, update lastDirection
+            return forcedMainDir;
+        }
+
         const dx = end[0]-currentX;
         const dy = end[1]-currentY;
 
@@ -137,7 +160,7 @@ function generatePath(start, end, options = {}) {
         return chosenDirection;
     }
 
-    let stepCount=0;
+    
     while(!isCloseToEnd()) {
         stepCount++;
         if (stepCount>1000) break;
@@ -264,7 +287,7 @@ const rightLowerPoint = [canvas.width * (5/6), canvas.height * 0.75];
 const rightUpperPoint = [canvas.width * (5/6), canvas.height * 0.25];
 
 // Right C
-// 1. bottom spawn > lower right
+// 1. Lower spawn > lower right
 const rightDownPath = generatePath(start, rightLowerPoint, {
     direction: "horizontal",
     stepSize: canvas.width * 0.03,
@@ -357,11 +380,19 @@ function generateRectanglesFromSegments(segments) {
         const length = Math.sqrt(dx*dx + dy*dy);
         if (length===0) continue;
 
+        const smallSegRange = canvas.width * 0.06;
+
         let isRoom = false;
         if (seg.direction==="diagonal") {
             isRoom = false;
         } else {
-            isRoom = Math.random()<0.5; 
+            if(length <= smallSegRange){
+                isRoom = false;
+            }
+            else{
+                isRoom = Math.random()<0.5; 
+            }
+            
         }
 
         let width, height;
@@ -435,74 +466,188 @@ function generateRectanglesFromSegments(segments) {
     return rects;
 }
 
-function adjustRectangles(rects) {
-    const threshold = 40; 
-    rects.sort((a,b)=> a.x - b.x);
 
-    for (let i=0; i<rects.length-1; i++) {
-        const r1 = rects[i];
-        const r2 = rects[i+1];
-
-        const r1Right = r1.x + r1.width;
-        const r2Left = r2.x;
-
-        
-        if (Math.abs(r2Left - r1Right) < threshold) {
-            const mid = (r2Left + r1Right)/2;
-            
-            const deltaR1 = mid - r1Right;
-            r1.width += deltaR1; 
-            const deltaR2 = r2Left - mid;
-            r2.x = r2.x - deltaR2; 
-        }
+function expandTop(rA, targetTop, maxExpand=50) {
+    const curTop = rA.y; 
+    if (targetTop < curTop) {
+      const expandAmount = curTop - targetTop;
+      if (expandAmount < maxExpand) {
+        rA.height += expandAmount;
+        rA.y = targetTop;
+        return true; 
+      }
     }
-    rects.sort((a,b)=> a.y - b.y);
+    return false;
+  }
+  
 
-    for (let i=0; i<rects.length-1; i++) {
-        const r1 = rects[i];
-        const r2 = rects[i+1];
-
-        const r1Bottom = r1.y + r1.height;
-        const r2Top = r2.y;
-
-        
-        if (Math.abs(r2Top - r1Bottom) < threshold) {
-            const mid = (r2Top + r1Bottom)/2;
-            
-            const deltaR1 = mid - r1Bottom;
-            r1.height += deltaR1; 
-            const deltaR2 = r2Top - mid;
-            r2.y = r2.y - deltaR2; 
-        }
+  function expandBottom(rA, targetBottom, maxExpand=50) {
+    const curBottom = rA.y + rA.height;
+    if (targetBottom > curBottom) {
+      const expandAmount = targetBottom - curBottom;
+      if (expandAmount < maxExpand) {
+        rA.height += expandAmount;
+        return true;
+      }
     }
+    return false;
+  }
+  
+  function expandLeft(rA, targetLeft, maxExpand=50) {
+    const curLeft = rA.x;
+    if (targetLeft < curLeft) {
+      const expandAmount = curLeft - targetLeft;
+      if (expandAmount < maxExpand) {
+        rA.width += expandAmount;
+        // x move left
+        rA.x = targetLeft;
+        return true;
+      }
+    }
+    return false;
+  }
+  
+ 
+  function expandRight(rA, targetRight, maxExpand=50) {
+    const curRight = rA.x + rA.width;
+    if (targetRight > curRight) {
+      const expandAmount = targetRight - curRight;
+      if (expandAmount < maxExpand) {
+        rA.width += expandAmount;
+        return true;
+      }
+    }
+    return false;
+  }
+  
+  function isHorizontallyOverlapping(rA, rB) {
+    const Aleft = rA.x, Aright = rA.x + rA.width;
+    const Bleft = rB.x, Bright = rB.x + rB.width;
+    return !(Bright < Aleft || Bleft > Aright);
+  }
+  
+  function isVerticallyOverlapping(rA, rB) {
+    const Atop = rA.y, Abottom = rA.y + rA.height;
+    const Btop = rB.y, Bbottom = rB.y + rB.height;
+    return !(Bbottom < Atop || Btop > Abottom);
+  }
+  
+  
+  
+  function unifySameEdges(rA, rB, threshold=10, maxExpand=50) {
+    let changed = false;
+  
+    const Atop = rA.y,
+          Abottom = rA.y + rA.height,
+          Aleft = rA.x,
+          Aright = rA.x + rA.width;
+    
+    const Btop = rB.y,
+          Bbottom = rB.y + rB.height,
+          Bleft = rB.x,
+          Bright = rB.x + rB.width;
+  
+    // 1. top-top
+    if (isHorizontallyOverlapping(rA, rB)) {
+      const distTop = Math.abs(Atop - Btop);
+      if (distTop < threshold) {
+        if (Atop < Btop) {
+          if(expandTop(rB, Atop, maxExpand)) changed=true;
+        } else {
+          if(expandTop(rA, Btop, maxExpand)) changed=true;
+        }
+      }
+    }
+  
+    // 2. bottom-bottom
+    if (isHorizontallyOverlapping(rA, rB)) {
+      const distBottom = Math.abs(Abottom - Bbottom);
+      if (distBottom < threshold) {
+        if (Abottom < Bbottom) {
+          if(expandBottom(rA, Bbottom, maxExpand)) changed=true;
+        } else {
+          if(expandBottom(rB, Abottom, maxExpand)) changed=true;
+        }
+      }
+    }
+  
+    // 3. left-left
+    if (isVerticallyOverlapping(rA, rB)) {
+      const distLeft = Math.abs(Aleft - Bleft);
+      if (distLeft < threshold) {
+        if (Aleft < Bleft) {
+          if(expandLeft(rB, Aleft, maxExpand)) changed=true;
+        } else {
+          if(expandLeft(rA, Bleft, maxExpand)) changed=true;
+        }
+      }
+    }
+  
+    // 4. right-right
+    if (isVerticallyOverlapping(rA, rB)) {
+      const distRight = Math.abs(Aright - Bright);
+      if (distRight < threshold) {
+        if (Aright < Bright) {
+          if(expandRight(rA, Bright, maxExpand)) changed=true;
+        } else {
+          if(expandRight(rB, Aright, maxExpand)) changed=true;
+        }
+      }
+    }
+  
+    return changed;
+  }
+  
+  
+  /**
+   * @param {Array} allRects Reacts Array
+   * @param {number} threshold Adjust Range
+   * @param {number} maxExpand Max Adjust distance
+   * @param {number} maxIterations 
+   */
+  function adjustRectangles(allRects, threshold=10, maxExpand=30, maxIterations=3) {
+    for (let iter=0; iter<maxIterations; iter++) {
+      let changed = false;
+      for (let i=0; i<allRects.length; i++) {
+        const rA = allRects[i];
+        for (let j=i+1; j<allRects.length; j++) {
+          const rB = allRects[j];
+          const didChange = unifySameEdges(rA, rB, threshold, maxExpand);
+          if (didChange) changed = true;
+        }
+      }
+      // If there is no change in this round, can exit early
+      if (!changed) break;
+    }
+    return allRects;
+  }
+  
 
-    return rects; 
-}
+let useColorRect = false;
+
+
 
 function drawRectangles(rects) {
-    ctx.fillStyle = "#505050";
-    for (const r of rects) {
-        ctx.fillRect(r.x, r.y, r.width, r.height);
-    }
-}
-
-// function drawRectangles(rects) {
-//     let lastColor = null;
+    // ctx.clearRect(0,0,canvas.width, canvas.height);
     
-//     for (const r of rects) {
-//         let color = getRandomColor();
-//         
-//         while (color === lastColor) {
-//             color = getRandomColor();
-//         }
-//         lastColor = color;
-        
-//         ctx.fillStyle = color;
-//         ctx.fillRect(r.x, r.y, r.width, r.height);
-//     }
-// }
-
-//debug function
+    if (!useColorRect) {
+      ctx.fillStyle = "#505050";
+      for (const r of rects) {
+          ctx.fillRect(r.x, r.y, r.width, r.height);
+      }
+    } else {
+      let lastColor = null;
+      for (const r of rects) {
+          let color = getRandomColor();
+          while (color === lastColor) {
+              color = getRandomColor();
+          }
+          lastColor = color;
+          ctx.fillStyle = color;
+          ctx.fillRect(r.x, r.y, r.width, r.height);
+      }
+    }
+  }
 function getRandomColor() {
     const h = Math.floor(Math.random()*360);
     const s = Math.floor(Math.random()*40)+60;
@@ -511,54 +656,105 @@ function getRandomColor() {
     return `hsla(${h},${s}%,${l}%,0.5)`;
 }
 
+const allRects = [];
 
 const middleSegments = getLineSegmentsFromPath(middlePath);
 const middleRects = generateRectanglesFromSegments(middleSegments);
-adjustRectangles(middleRects);
-drawRectangles(middleRects);
+allRects.push(...middleRects);
+// drawRectangles(middleRects);
 
 // Left C
 const leftUpperSegments = getLineSegmentsFromPath(leftUpperPath);
 const leftUpperRects = generateRectanglesFromSegments(leftUpperSegments);
-adjustRectangles(leftUpperRects);
-drawRectangles(leftUpperRects);
+allRects.push(...leftUpperRects);
+// drawRectangles(leftUpperRects);
 
 
 const leftMidSegments = getLineSegmentsFromPath(leftMidPath);
 const leftMidRects = generateRectanglesFromSegments(leftMidSegments);
-adjustRectangles(leftMidRects);
-drawRectangles(leftMidRects);
+allRects.push(...leftMidRects);
+// drawRectangles(leftMidRects);
 
 
 const leftDownSegments = getLineSegmentsFromPath(leftDownPath);
 const leftDownRects = generateRectanglesFromSegments(leftDownSegments);
-adjustRectangles(leftDownRects);
-drawRectangles(leftDownRects);
+allRects.push(...leftDownRects);
+// drawRectangles(leftDownRects);
 
 
 // Right C
 const rightDownSegments = getLineSegmentsFromPath(rightDownPath);
 const rightDownRects = generateRectanglesFromSegments(rightDownSegments);
-adjustRectangles(rightDownRects);
-drawRectangles(rightDownRects);
+allRects.push(...rightDownRects);
+// drawRectangles(rightDownRects);
 
 
 const rightMidSegments = getLineSegmentsFromPath(rightMidPath);
 const rightMidRects = generateRectanglesFromSegments(rightMidSegments);
-adjustRectangles(rightMidRects);
-drawRectangles(rightMidRects);
+allRects.push(...rightMidRects);
+// drawRectangles(rightMidRects);
 
 
 const rightUpSegments = getLineSegmentsFromPath(rightUpPath);
 const rightUpRects = generateRectanglesFromSegments(rightUpSegments);
-adjustRectangles(rightUpRects);
-drawRectangles(rightUpRects);
+allRects.push(...rightUpRects);
+// drawRectangles(rightUpRects);
+
+adjustRectangles(allRects, 25, 30, 3);
+
+document.addEventListener("keydown", (e) => {
+    if (e.key === "1") {
+      useColorRect = !useColorRect;  
+  
+    //   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  
+      drawRectangles(allRects);
+    //   drawPath(middlePath);
+    //   drawPath(leftUpperPath);
+    //   drawPath(leftMidPath);
+    //   drawPath(leftDownPath);
+    //   drawPath(rightDownPath);
+    //   drawPath(rightMidPath);
+    //   drawPath(rightUpPath);
+    }
+  });
+
+drawRectangles(allRects);
 //draw path above rectangles
-drawPath(middlePath);
-drawPath(leftUpperPath);
-drawPath(leftMidPath);
-drawPath(leftDownPath);
-drawPath(rightDownPath);
-drawPath(rightMidPath);
-drawPath(rightUpPath);
+// drawPath(middlePath);
+// drawPath(leftUpperPath);
+// drawPath(leftMidPath);
+// drawPath(leftDownPath);
+// drawPath(rightDownPath);
+// drawPath(rightMidPath);
+// drawPath(rightUpPath);
+
+function drawBombSite(label, path) {
+    if (path.length < 2) return;
+    
+    const midIndex = Math.floor(path.length / 2);
+    const [cx, cy] = path[midIndex];
+  
+    const minSize = canvas.width * 0.15;
+    const maxSize = canvas.width * 0.2;
+    const size = minSize + Math.random() * (maxSize - minSize);
+  
+    const x = cx - size/2;
+    const y = cy - size/2;
+  
+    ctx.fillStyle = "#c2b280";  
+    ctx.fillRect(x, y, size, size);
+  
+    ctx.fillStyle = "black";
+    ctx.font = "bold 24px Arial";
+    const textWidth = ctx.measureText(label).width;
+    const textX = x + (size - textWidth)/2;
+    const textY = y + size/2 + 8; 
+    ctx.fillText(label, textX, textY);
+  }
+
+// drawBombSite("A", leftMidPath);
+// drawBombSite("B", rightMidPath);
+
+
 
